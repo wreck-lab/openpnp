@@ -133,6 +133,7 @@ public class SerialPortCommunications extends ReferenceDriverCommunications {
         for (SerialPort port : ports) {
             portNames.add(port.getSystemPortName());
         }
+        portNames.add("/tmp/printer");
         return portNames.toArray(new String[] {});
     }
 
