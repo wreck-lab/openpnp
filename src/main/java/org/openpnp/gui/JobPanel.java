@@ -30,6 +30,7 @@ import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.AffineTransform;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.io.File;
@@ -73,7 +74,7 @@ import org.openpnp.gui.components.AutoSelectTextTable;
 import org.openpnp.gui.importer.BoardImporter;
 import org.openpnp.gui.panelization.DlgAutoPanelize;
 import org.openpnp.gui.panelization.DlgPanelXOut;
-import org.openpnp.gui.processes.TwoPlacementBoardLocationProcess;
+import org.openpnp.gui.processes.MultiPlacementBoardLocationProcess;
 import org.openpnp.gui.support.ActionGroup;
 import org.openpnp.gui.support.Helpers;
 import org.openpnp.gui.support.Icons;
@@ -289,7 +290,8 @@ public class JobPanel extends JPanel {
 
         JPanel pnlBoards = new JPanel();
         pnlBoards.setBorder(new TitledBorder(new EtchedBorder(EtchedBorder.LOWERED, null, null),
-                "Boards", TitledBorder.LEADING, TitledBorder.TOP, null, new Color(0, 0, 0))); //$NON-NLS-1$
+                Translations.getString("JobPanel.Tab.Boards"),
+                TitledBorder.LEADING, TitledBorder.TOP, null, new Color(0, 0, 0))); //$NON-NLS-1$
         pnlBoards.setLayout(new BorderLayout(0, 0));
 
         JToolBar toolBarBoards = new JToolBar();
@@ -683,28 +685,31 @@ public class JobPanel extends JPanel {
     private void updateJobActions() {
         if (state == State.Stopped) {
             startPauseResumeJobAction.setEnabled(true);
-            startPauseResumeJobAction.putValue(AbstractAction.NAME, "Start"); //$NON-NLS-1$
+            startPauseResumeJobAction.putValue(AbstractAction.NAME,
+                    Translations.getString("JobPanel.Action.Job.Start")); //$NON-NLS-1$
             startPauseResumeJobAction.putValue(AbstractAction.SMALL_ICON, Icons.start);
             startPauseResumeJobAction.putValue(AbstractAction.SHORT_DESCRIPTION,
-                    "Start processing the job."); //$NON-NLS-1$
+                    Translations.getString("JobPanel.Action.Job.Start.Description")); //$NON-NLS-1$
             stopJobAction.setEnabled(false);
             stepJobAction.setEnabled(true);
         }
         else if (state == State.Running) {
             startPauseResumeJobAction.setEnabled(true);
-            startPauseResumeJobAction.putValue(AbstractAction.NAME, "Pause"); //$NON-NLS-1$
+            startPauseResumeJobAction.putValue(AbstractAction.NAME,
+                    Translations.getString("JobPanel.Action.Job.Pause")); //$NON-NLS-1$
             startPauseResumeJobAction.putValue(AbstractAction.SMALL_ICON, Icons.pause);
             startPauseResumeJobAction.putValue(AbstractAction.SHORT_DESCRIPTION,
-                    "Pause processing of the job."); //$NON-NLS-1$
+                    Translations.getString("JobPanel.Action.Job.Pause.Description")); //$NON-NLS-1$
             stopJobAction.setEnabled(true);
             stepJobAction.setEnabled(false);
         }
         else if (state == State.Paused) {
             startPauseResumeJobAction.setEnabled(true);
-            startPauseResumeJobAction.putValue(AbstractAction.NAME, "Resume"); //$NON-NLS-1$
+            startPauseResumeJobAction.putValue(AbstractAction.NAME,
+                    Translations.getString("JobPanel.Action.Job.Resume")); //$NON-NLS-1$
             startPauseResumeJobAction.putValue(AbstractAction.SMALL_ICON, Icons.start);
             startPauseResumeJobAction.putValue(AbstractAction.SHORT_DESCRIPTION,
-                    "Resume processing of the job."); //$NON-NLS-1$
+                    Translations.getString("JobPanel.Action.Job.Resume.Description")); //$NON-NLS-1$
             stopJobAction.setEnabled(true);
             stepJobAction.setEnabled(true);
         }
@@ -917,19 +922,11 @@ public class JobPanel extends JPanel {
              */
             
             MessageBoxes.errorBox(getTopLevelAncestor(), "Job Error", t.getMessage());
-            // We are either Running or Stepping. If Stepping, there is nothing to do. Just
-            // clear the dialog and let the user take control. If Running we need to transition
-            // to Stepping.
-            if (state == State.Running) {
-                try {
-                    setState(State.Paused);
-                }
-                catch (Exception e) {
-                    // Since we are checking if we're in the Running state this should not
-                    // ever happen. If it does, the Error will let us know.
-                    e.printStackTrace();
-                    throw new Error(e);
-                }
+            if (state == State.Running || state == State.Pausing) {
+                setState(State.Paused);
+            }
+            else if (state == State.Stopping) {
+                setState(State.Stopped);
             }
         });
     }
@@ -1206,9 +1203,9 @@ public class JobPanel extends JPanel {
     public final Action captureCameraBoardLocationAction = new AbstractAction() {
         {
             putValue(SMALL_ICON, Icons.captureCamera);
-            putValue(NAME, "Capture Camera Location"); //$NON-NLS-1$
+            putValue(NAME,Translations.getString("JobPanel.Action.Job.Board.CaptureCameraLocation")); //$NON-NLS-1$
             putValue(SHORT_DESCRIPTION,
-                    "Set the board's location to the camera's current position."); //$NON-NLS-1$
+                    Translations.getString("JobPanel.Action.Job.Board.CaptureCameraLocation.Description")); //$NON-NLS-1$
         }
 
         @Override
@@ -1227,8 +1224,8 @@ public class JobPanel extends JPanel {
     public final Action captureToolBoardLocationAction = new AbstractAction() {
         {
             putValue(SMALL_ICON, Icons.captureTool);
-            putValue(NAME, "Capture Tool Location"); //$NON-NLS-1$
-            putValue(SHORT_DESCRIPTION, "Set the board's location to the tool's current position."); //$NON-NLS-1$
+            putValue(NAME, Translations.getString("JobPanel.Action.Job.Board.CaptureToolLocation")); //$NON-NLS-1$
+            putValue(SHORT_DESCRIPTION, Translations.getString("JobPanel.Action.Job.Board.CaptureToolLocation.Description")); //$NON-NLS-1$
         }
 
         @Override
@@ -1241,11 +1238,11 @@ public class JobPanel extends JPanel {
     };
 
     public final Action moveCameraToBoardLocationAction =
-            new AbstractAction("Move Camera To Board Location") { //$NON-NLS-1$
+            new AbstractAction(Translations.getString("JobPanel.Action.Job.Camera.PositionAtBoardLocation")) { //$NON-NLS-1$
                 {
                     putValue(SMALL_ICON, Icons.centerCamera);
-                    putValue(NAME, "Move Camera To Board Location"); //$NON-NLS-1$
-                    putValue(SHORT_DESCRIPTION, "Position the camera at the board's location."); //$NON-NLS-1$
+                    putValue(NAME, Translations.getString("JobPanel.Action.Job.Camera.PositionAtBoardLocation")); //$NON-NLS-1$
+                    putValue(SHORT_DESCRIPTION, Translations.getString("JobPanel.Action.Job.Camera.PositionAtBoardLocation.Description")); //$NON-NLS-1$
                 }
 
                 @Override
@@ -1268,12 +1265,12 @@ public class JobPanel extends JPanel {
                 }
             };
     public final Action moveCameraToBoardLocationNextAction =
-            new AbstractAction("Move Camera To Board Location") { //$NON-NLS-1$
+            new AbstractAction(Translations.getString("JobPanel.Action.Job.Camera.PositionAtNextBoardLocation")) { //$NON-NLS-1$
                 {
                     putValue(SMALL_ICON, Icons.centerCameraMoveNext);
-                    putValue(NAME, "Move Camera to the Next Board"); //$NON-NLS-1$
+                    putValue(NAME, Translations.getString("JobPanel.Action.Job.Camera.PositionAtNextBoardLocation")); //$NON-NLS-1$
                     putValue(SHORT_DESCRIPTION,
-                            "Position the camera at the next board's location."); //$NON-NLS-1$
+                            Translations.getString("JobPanel.Action.Job.Camera.PositionAtNextBoardLocation.Description")); //$NON-NLS-1$
                 }
 
                 @Override
@@ -1307,8 +1304,8 @@ public class JobPanel extends JPanel {
     public final Action moveToolToBoardLocationAction = new AbstractAction() {
         {
             putValue(SMALL_ICON, Icons.centerTool);
-            putValue(NAME, "Move Tool To Board Location"); //$NON-NLS-1$
-            putValue(SHORT_DESCRIPTION, "Position the tool at the board's location."); //$NON-NLS-1$
+            putValue(NAME, Translations.getString("JobPanel.Action.Job.Tool.PositionAtBoardLocation")); //$NON-NLS-1$
+            putValue(SHORT_DESCRIPTION, Translations.getString("JobPanel.Action.Job.Tool.PositionAtBoardLocation.Description")); //$NON-NLS-1$
         }
 
         @Override
@@ -1324,15 +1321,15 @@ public class JobPanel extends JPanel {
     public final Action twoPointLocateBoardLocationAction = new AbstractAction() {
         {
             putValue(SMALL_ICON, Icons.twoPointLocate);
-            putValue(NAME, "Two Point Board Location"); //$NON-NLS-1$
+            putValue(NAME, Translations.getString("JobPanel.Action.Job.Board.TwoPointBoardLocation")); //$NON-NLS-1$
             putValue(SHORT_DESCRIPTION,
-                    "Set the board's location and rotation using two placements."); //$NON-NLS-1$
+                    Translations.getString("JobPanel.Action.Job.Board.TwoPointBoardLocation.Description")); //$NON-NLS-1$
         }
 
         @Override
         public void actionPerformed(ActionEvent arg0) {
             UiUtils.messageBoxOnException(() -> {
-                new TwoPlacementBoardLocationProcess(frame, JobPanel.this);
+                new MultiPlacementBoardLocationProcess(frame, JobPanel.this);
             });
         }
     };
@@ -1340,17 +1337,31 @@ public class JobPanel extends JPanel {
     public final Action fiducialCheckAction = new AbstractAction() {
         {
             putValue(SMALL_ICON, Icons.fiducialCheck);
-            putValue(NAME, "Fiducial Check"); //$NON-NLS-1$
+            putValue(NAME, Translations.getString("JobPanel.Action.Job.Board.FiducialCheck")); //$NON-NLS-1$
             putValue(SHORT_DESCRIPTION,
-                    "Perform a fiducial check for the board and update it's location and rotation."); //$NON-NLS-1$
+                    Translations.getString("JobPanel.Action.Job.Board.FiducialCheck.Description")); //$NON-NLS-1$
         }
 
         @Override
         public void actionPerformed(ActionEvent arg0) {
             UiUtils.submitUiMachineTask(() -> {
+                BoardLocation boardLocation = getSelection();
                 Location location = Configuration.get().getMachine().getFiducialLocator()
-                        .locateBoard(getSelection());
+                        .locateBoard(boardLocation);
+                
+                /**
+                 * Set the board's location to the one returned from the fiducial check. We have
+                 * to store and restore the placement transform because setting the location
+                 * clears it.
+                 */
+                AffineTransform tx = boardLocation.getPlacementTransform();
+                boardLocation.setLocation(location);
+                boardLocation.setPlacementTransform(tx);
                 refreshSelectedRow();
+                
+                /**
+                 * Move the camera to the calculated position.
+                 */
                 HeadMountable tool = MainFrame.get().getMachineControls().getSelectedTool();
                 Camera camera = tool.getHead().getDefaultCamera();
                 MainFrame.get().getCameraViews().ensureCameraVisible(camera);
@@ -1362,8 +1373,8 @@ public class JobPanel extends JPanel {
     public final Action panelizeAction = new AbstractAction() {
         {
             putValue(SMALL_ICON, Icons.autoPanelize);
-            putValue(NAME, "Panelize Board"); //$NON-NLS-1$
-            putValue(SHORT_DESCRIPTION, "Autopanelize the loaded board into an array"); //$NON-NLS-1$
+            putValue(NAME, Translations.getString("JobPanel.Action.Job.Board.Panelize")); //$NON-NLS-1$
+            putValue(SHORT_DESCRIPTION, Translations.getString("JobPanel.Action.Job.Board.Panelize.Description")); //$NON-NLS-1$
         }
 
         @Override
@@ -1371,8 +1382,9 @@ public class JobPanel extends JPanel {
 
             if (job.isUsingPanel() == false) {
                 if (job.getBoardLocations().size() > 1) {
-                    MessageBoxes.errorBox(frame, "Panelize Error", //$NON-NLS-1$
-                            "Panelization can only occur on a single board."); //$NON-NLS-1$
+                    MessageBoxes.errorBox(frame,
+                            Translations.getString("JobPanel.Action.Job.Board.Panelize.Error"), //$NON-NLS-1$
+                            Translations.getString("JobPanel.Action.Job.Board.Panelize.Error.Description")); //$NON-NLS-1$
                     return;
                 }
             }
@@ -1385,8 +1397,8 @@ public class JobPanel extends JPanel {
     public final Action panelizeXOutAction = new AbstractAction() {
         {
             putValue(SMALL_ICON, Icons.autoPanelizeXOut);
-            putValue(NAME, "Xout Panelized"); //$NON-NLS-1$
-            putValue(SHORT_DESCRIPTION, "Skip certain PCBs on Panelized Boards"); //$NON-NLS-1$
+            putValue(NAME, Translations.getString("JobPanel.Action.Job.Board.Panelize.SkipBoard")); //$NON-NLS-1$
+            putValue(SHORT_DESCRIPTION, Translations.getString("JobPanel.Action.Job.Board.Panelize.SkipBoard.Description")); //$NON-NLS-1$
         }
 
         @Override
@@ -1399,9 +1411,9 @@ public class JobPanel extends JPanel {
     public final Action panelizeFiducialCheck = new AbstractAction() {
         {
             putValue(SMALL_ICON, Icons.autoPanelizeFidCheck);
-            putValue(NAME, "Panelized Fid Check"); //$NON-NLS-1$
+            putValue(NAME, Translations.getString("JobPanel.Action.Job.Board.Panelize.FiducialCheck")); //$NON-NLS-1$
             putValue(SHORT_DESCRIPTION,
-                    "Perform a fiducial check on a panel and update its position and rotation"); //$NON-NLS-1$
+                    Translations.getString("JobPanel.Action.Job.Board.Panelize.FiducialCheck.Description")); //$NON-NLS-1$
         }
 
         @Override

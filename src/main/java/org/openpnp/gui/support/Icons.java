@@ -28,6 +28,7 @@ public class Icons {
     public static Icon centerTool = getIcon("/icons/position-nozzle.svg");
     public static Icon centerToolNoSafeZ = getIcon("/icons/position-nozzle-no-safe-z.svg");
     public static Icon centerPin = getIcon("/icons/position-actuator.svg");
+    public static Icon centerPinNoSafeZ = getIcon("/icons/position-actuator-no-safe-z.svg");
     public static Icon centerCameraOnFeeder = getIcon("/icons/position-camera-on-feeder.svg");
     public static Icon centerNozzleOnFeeder = getIcon("/icons/position-nozzle-on-feeder.svg");
 
@@ -77,6 +78,14 @@ public class Icons {
     public static Icon park = getIcon("/icons/park.svg");
 
     public static Icon scrollDown = getIcon("/icons/scroll-down.svg");
+
+    public static Icon lockOutline = getIcon("/icons/lock-outline.svg");
+    public static Icon lockOpenOutline = getIcon("/icons/lock-open-outline.svg");
+    public static Icon lockQuestion = getIcon("/icons/lock-question.svg");
+
+    public static Icon openSCadIcon = getIcon("/icons/openscad-icon.svg");
+    public static Icon processActivity1Icon = getIcon("/icons/process-activity-1.svg");
+    public static Icon processActivity2Icon = getIcon("/icons/process-activity-2.svg");
 
     public static Icon getIcon(String resourceName, int width, int height) {
         if (resourceName.endsWith(".svg")) {

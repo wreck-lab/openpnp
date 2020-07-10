@@ -69,12 +69,15 @@ import org.openpnp.spi.Camera;
 import org.openpnp.spi.Nozzle;
 import org.openpnp.util.MovableUtils;
 import org.openpnp.util.UiUtils;
+import org.openpnp.util.Utils2D;
 import org.openpnp.util.XmlSerialize;
 import org.pmw.tinylog.Logger;
 
 @SuppressWarnings("serial")
 public class CameraView extends JComponent implements CameraListener {
     private static final String PREF_RETICLE = "CamerView.reticle";
+    private static final String PREF_ZOOM_INCREMENT = "CamerView.zoomIncrement";
+    private static final double DEFAULT_ZOOM_INCREMENT = 0.01;
 
     private static final String DEFAULT_RETICLE_KEY = "DEFAULT_RETICLE_KEY";
 
@@ -188,10 +191,15 @@ public class CameraView extends JComponent implements CameraListener {
     private boolean showName = false;
     
     private double zoom = 1d;
+    private double zoomIncPerMouseWheelTick = DEFAULT_ZOOM_INCREMENT;
     
     private boolean dragJogging = false;
     
+    private MouseEvent dragJoggingStart = null;
     private MouseEvent dragJoggingTarget = null;
+    private int dragJogHandleSize = 50;
+    Color dragJogHandleInactiveColor = new Color(125, 125, 125);
+    Color dragJogHandleActiveColor = Color.white;
     
     long lastFrameReceivedTime = 0;
     MovingAverage fpsAverage = new MovingAverage(24);
@@ -227,6 +235,10 @@ public class CameraView extends JComponent implements CameraListener {
     
     private String getReticlePrefKey() {
         return PREF_RETICLE + "." + camera.getId();
+    }
+
+    private String getZoomIncrementPrefKey() {
+        return PREF_ZOOM_INCREMENT + "." + camera.getId();
     }
 
     public void addActionListener(CameraViewActionListener listener) {
@@ -266,6 +278,9 @@ public class CameraView extends JComponent implements CameraListener {
                 Logger.debug("No reticle preference found.");
             }
         }
+
+        // load the zoom increment pref, if any
+        zoomIncPerMouseWheelTick = prefs.getDouble(getZoomIncrementPrefKey(), DEFAULT_ZOOM_INCREMENT);
 
     }
 
@@ -330,6 +345,15 @@ public class CameraView extends JComponent implements CameraListener {
         this.text = text;
     }
 
+    public double getZoomIncPerMouseWheelTick() {
+        return zoomIncPerMouseWheelTick;
+    }
+
+    public void setZoomIncPerMouseWheelTick(double zoomIncPerMouseWheelTick) {
+        prefs.putDouble(getZoomIncrementPrefKey(), zoomIncPerMouseWheelTick);
+        this.zoomIncPerMouseWheelTick = zoomIncPerMouseWheelTick;
+    }
+    
     /**
      * Causes a short flash in the CameraView to get the user's attention.
      */
@@ -391,6 +415,8 @@ public class CameraView extends JComponent implements CameraListener {
                 }
             }
         });
+        // Make sure the filtered image is shown immediately and also counted as fps (for 0 or low fps cameras). 
+        frameReceived(null);
     }
 
     public BufferedImage captureSelectionImage() {
@@ -551,7 +577,9 @@ public class CameraView extends JComponent implements CameraListener {
                 paintSelection(g2d);
             }
 
-            paintDragJogging(g2d);
+            if (!selectionEnabled) {
+                paintDragJogging(g2d);
+            }
         }
         else {
             g.setColor(Color.red);
@@ -569,15 +597,152 @@ public class CameraView extends JComponent implements CameraListener {
         }
     }
     
-    private void paintDragJogging(Graphics2D g2d) {
-        if (!isDragJogging() || dragJoggingTarget == null) {
-            return;
+    private boolean isPointInsideRectangle(int pointX, int pointY, int rectX1, int rectY1, int rectX2, int rectY2) {
+        return pointX >= rectX1 && pointX <= rectX2 && pointY >= rectY1 && pointY <= rectY2;
+    }
+    
+    private boolean isPointInsideCircle(int pointX, int pointY, int circleX, int circleY, int circleRadius) {
+        return Math.pow(pointX - circleX, 2) + Math.pow(pointY - circleY, 2) <= Math.pow(circleRadius, 2);
+    }
+    
+    private boolean isPointInsideDragJogRotationHandle(int x, int y) {
+        if (camera.getHead() == null) {
+            return false;
         }
+        
         Insets ins = getInsets();
         int width = getWidth() - ins.left - ins.right;
         int height = getHeight() - ins.top - ins.bottom;
-        g2d.setColor(Color.white);
-        g2d.drawLine(width / 2, height / 2, dragJoggingTarget.getX(), dragJoggingTarget.getY());
+        int handleSize = 50;
+        int halfHandleSize = handleSize / 2;
+        
+        // The rotation handle is drawn on an imaginary circle centered in the view
+        double rotHandleRadius = Math.min(width, height) / 2 * .80;
+        double rotHandleAngle = -Utils2D.normalizeAngle(camera.getLocation().getRotation() + 90);
+        double rotHandleX = rotHandleRadius * Math.cos(Math.toRadians(rotHandleAngle)) + (width / 2.);
+        double rotHandleY = rotHandleRadius * Math.sin(Math.toRadians(rotHandleAngle)) + (height / 2.);
+        
+        return isPointInsideCircle(x, y, (int) rotHandleX, (int) rotHandleY, (int) halfHandleSize);
+    }
+    
+    private boolean isPointInsideDragJogXyHandle(int x, int y) {
+        Insets ins = getInsets();
+        int width = getWidth() - ins.left - ins.right;
+        int height = getHeight() - ins.top - ins.bottom;
+        int halfHandleSize = dragJogHandleSize / 2;
+        
+        int xyHandleX0 = width / 2 - halfHandleSize;
+        int xyHandleY0 = height / 2 - halfHandleSize;
+        int xyHandleX1 = xyHandleX0 + dragJogHandleSize;
+        int xyHandleY1 = xyHandleY0 + dragJogHandleSize;
+        
+        return isPointInsideRectangle(x, y, xyHandleX0, xyHandleY0, xyHandleX1, xyHandleY1);
+    }
+    
+    private boolean isPointInsideDragJogHandle(int x, int y) {
+        return isPointInsideDragJogXyHandle(x, y) || isPointInsideDragJogRotationHandle(x, y);
+    }
+    
+    private void drawCircle(Graphics2D g2d, int centerX, int centerY, int radius) {
+        g2d.drawArc(centerX - radius, centerY - radius, radius * 2, radius * 2, 0, 360);
+    }
+
+    private double snapRotationAngleToTypicalAngles(double angle) {
+        // Round to typical pcb placing angles
+        return ((int) Math.round(angle / 45)) * 45.0;
+    }
+    
+    private void paintDragJogRotationHandle(Graphics2D g2d, boolean active) {
+        if (camera.getHead() == null) {
+            return;
+        }
+        
+        Insets ins = getInsets();
+        int width = getWidth() - ins.left - ins.right;
+        int height = getHeight() - ins.top - ins.bottom;
+
+        // The rotation handle is drawn on an imaginary circle centered in the view
+        double rotHandleRadius = Math.min(width, height) / 2 * .80;
+        double rotHandleAngle = -Utils2D.normalizeAngle(camera.getLocation().getRotation() + 90);
+        double rotHandleX = rotHandleRadius * Math.cos(Math.toRadians(rotHandleAngle)) + (width / 2.);
+        double rotHandleY = rotHandleRadius * Math.sin(Math.toRadians(rotHandleAngle)) + (height / 2.);
+
+        // Draw the circular handle at it's original position in the inactive color
+        g2d.setColor(dragJogHandleInactiveColor);
+        drawCircle(g2d, (int) rotHandleX, (int) rotHandleY, dragJogHandleSize / 2);
+
+        if (active) {
+            // Draw the imaginary circle as a guideline for the rotation handle
+            g2d.setColor(dragJogHandleInactiveColor);
+            drawCircle(g2d, width / 2, height / 2, (int) rotHandleRadius);
+            
+            int targetX = dragJoggingTarget.getX();
+            int targetY = dragJoggingTarget.getY();
+            
+            // Now draw the circular handle at it's target position in the active color
+            double rotTargetHandleAngle = Math.toDegrees(Math.atan2(targetY - (height / 2), targetX - (width / 2)));
+            rotTargetHandleAngle = Utils2D.normalizeAngle(rotTargetHandleAngle);
+
+            // If the alt button is pressed snap to certain angles
+            if(dragJoggingTarget.isAltDown()) {
+                rotTargetHandleAngle = snapRotationAngleToTypicalAngles(rotTargetHandleAngle);
+            }
+
+            double rotTargetHandleX = rotHandleRadius * Math.cos(Math.toRadians(rotTargetHandleAngle)) + (width / 2.);
+            double rotTargetHandleY = rotHandleRadius * Math.sin(Math.toRadians(rotTargetHandleAngle)) + (height / 2.);
+            g2d.setColor(dragJogHandleActiveColor);
+            drawCircle(g2d, (int) rotTargetHandleX, (int) rotTargetHandleY, dragJogHandleSize / 2);
+            
+            // And draw a rotated crosshair to help the user line things up
+            double x1 = rotHandleRadius * Math.cos(Math.toRadians(rotTargetHandleAngle)) + (width / 2.);
+            double y1 = rotHandleRadius * Math.sin(Math.toRadians(rotTargetHandleAngle)) + (height / 2.);
+            double x2 = rotHandleRadius * Math.cos(Math.toRadians(rotTargetHandleAngle + 180)) + (width / 2.);
+            double y2 = rotHandleRadius * Math.sin(Math.toRadians(rotTargetHandleAngle + 180)) + (height / 2.);
+            g2d.drawLine((int) x1, (int) y1, (int) x2, (int) y2);
+            x1 = rotHandleRadius * Math.cos(Math.toRadians(rotTargetHandleAngle + 90)) + (width / 2.);
+            y1 = rotHandleRadius * Math.sin(Math.toRadians(rotTargetHandleAngle + 90)) + (height / 2.);
+            x2 = rotHandleRadius * Math.cos(Math.toRadians(rotTargetHandleAngle + 270)) + (width / 2.);
+            y2 = rotHandleRadius * Math.sin(Math.toRadians(rotTargetHandleAngle + 270)) + (height / 2.);
+            g2d.drawLine((int) x1, (int) y1, (int) x2, (int) y2);
+        }
+    }
+    
+    private void paintDragJogXyHandle(Graphics2D g2d, boolean active) {
+        Insets ins = getInsets();
+        int width = getWidth() - ins.left - ins.right;
+        int height = getHeight() - ins.top - ins.bottom;
+
+        int xyHandleX0 = width / 2 - dragJogHandleSize / 2;
+        int xyHandleY0 = height / 2 - dragJogHandleSize / 2;
+
+        g2d.setColor(dragJogHandleInactiveColor);
+        g2d.drawRect(xyHandleX0, xyHandleY0, dragJogHandleSize, dragJogHandleSize);
+
+        if (active) {
+            int targetX = dragJoggingTarget.getX();
+            int targetY = dragJoggingTarget.getY();
+            
+            int xyTargetHandleX0 = targetX - dragJogHandleSize / 2;
+            int xyTargetHandleY0 = targetY - dragJogHandleSize / 2;
+            g2d.setColor(dragJogHandleActiveColor);
+            g2d.drawRect(xyTargetHandleX0, xyTargetHandleY0, dragJogHandleSize, dragJogHandleSize);
+            
+            g2d.drawLine(xyTargetHandleX0 + dragJogHandleSize / 2, xyTargetHandleY0,
+                    xyTargetHandleX0 + dragJogHandleSize / 2, xyTargetHandleY0 + dragJogHandleSize);
+            g2d.drawLine(xyTargetHandleX0, xyTargetHandleY0 + dragJogHandleSize / 2,
+                    xyTargetHandleX0 + dragJogHandleSize, xyTargetHandleY0 + dragJogHandleSize / 2);
+            
+            g2d.drawLine(xyHandleX0 + dragJogHandleSize / 2, 
+                    xyHandleY0 + dragJogHandleSize / 2,
+                    targetX, targetY);
+        }
+    }
+    
+    private void paintDragJogging(Graphics2D g2d) {
+        paintDragJogXyHandle(g2d, isDragJogging() 
+                && !isPointInsideDragJogRotationHandle(dragJoggingStart.getX(), dragJoggingStart.getY()));
+        paintDragJogRotationHandle(g2d, isDragJogging() 
+                && isPointInsideDragJogRotationHandle(dragJoggingStart.getX(), dragJoggingStart.getY()));
     }
 
     private void paintSelection(Graphics2D g2d) {
@@ -1132,10 +1297,7 @@ public class CameraView extends JComponent implements CameraListener {
         }
     }
 
-    private void moveToClick(MouseEvent e) {
-        int x = e.getX();
-        int y = e.getY();
-
+    public Location getCameraViewCenterOffsetsFromXy(int x, int y) {
         // Find the difference in X and Y from the center of the image
         // to the mouse click.
         double offsetX = (scaledWidth / 2.0D) - (x - imageX);
@@ -1149,12 +1311,17 @@ public class CameraView extends JComponent implements CameraListener {
         offsetX *= scaledUnitsPerPixelX;
         offsetY *= scaledUnitsPerPixelY;
 
-        // The offsets now represent the distance to move the camera
-        // in the Camera's units per pixel's units.
+        // The offsets now represent the distance in the Camera's units per pixel's units.
 
         // Create a location in the Camera's units per pixel's units
         // and with the values of the offsets.
         Location offsets = camera.getUnitsPerPixel().derive(offsetX, offsetY, 0.0, 0.0);
+        return offsets;
+    }
+
+    private void moveToClick(MouseEvent e) {
+        // Get the offset from the Camera view center in Camera's units.
+        Location offsets = getCameraViewCenterOffsetsFromXy(e.getX(), e.getY());
         // And move there.
         UiUtils.submitUiMachineTask(() -> {
             if (camera.getHead() == null) {
@@ -1168,6 +1335,32 @@ public class CameraView extends JComponent implements CameraListener {
                 // Add the offsets to the Camera's position.
                 Location location = camera.getLocation().add(offsets);
                 // move the camera to the location
+                MovableUtils.moveToLocationAtSafeZ(camera, location);
+            }
+        });
+    }
+    
+    private void rotateToClick(MouseEvent e) {
+        Insets ins = getInsets();
+        int width = getWidth() - ins.left - ins.right;
+        int height = getHeight() - ins.top - ins.bottom;
+
+        double rotTargetHandleAngle = Math.toDegrees(Math.atan2(e.getY() - (height / 2), e.getX() - (width / 2)));
+        rotTargetHandleAngle = Utils2D.normalizeAngle(rotTargetHandleAngle);
+
+        // If the alt button is pressed snap to certain angles
+        if(e.isAltDown()) {
+            rotTargetHandleAngle = snapRotationAngleToTypicalAngles(rotTargetHandleAngle);
+        }
+
+        double targetAngle = Utils2D.normalizeAngle(-(rotTargetHandleAngle + 90));
+        UiUtils.submitUiMachineTask(() -> {
+            if (camera.getHead() == null) {
+                Logger.warn("Drag rotate not yet implemented for upward facing cameras."); 
+            }
+            else {
+                Location location = camera.getLocation();
+                location = location.derive(null, null, null, targetAngle);
                 MovableUtils.moveToLocationAtSafeZ(camera, location);
             }
         });
@@ -1261,6 +1454,7 @@ public class CameraView extends JComponent implements CameraListener {
     
     private void dragJoggingBegin(MouseEvent e) {
         this.dragJogging = true;
+        this.dragJoggingStart = e;
         this.dragJoggingTarget = e;
         repaint();
     }
@@ -1271,10 +1465,20 @@ public class CameraView extends JComponent implements CameraListener {
     }
     
     private void dragJoggingEnd(MouseEvent e) {
+        int startX = dragJoggingStart.getX();
+        int startY = dragJoggingStart.getY();
+        
         this.dragJogging = false;
+        this.dragJoggingStart = null;
         this.dragJoggingTarget = null;
         repaint();
-        moveToClick(e);
+        
+        if (isPointInsideDragJogRotationHandle(startX, startY)) {
+            rotateToClick(e);
+        }
+        else {
+            moveToClick(e);
+        }
     }
     
     private boolean isDragJogging() {
@@ -1355,7 +1559,7 @@ public class CameraView extends JComponent implements CameraListener {
     private MouseWheelListener mouseWheelListener = new MouseWheelListener() {
         @Override
         public void mouseWheelMoved(MouseWheelEvent e) {
-            zoom -= e.getPreciseWheelRotation() * 0.01d;
+            zoom -= e.getPreciseWheelRotation() * zoomIncPerMouseWheelTick;
             zoom = Math.max(zoom, 1.0d);
             zoom = Math.min(zoom, 100d);
             calculateScalingData();
