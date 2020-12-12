@@ -1,3 +1,3 @@
 #!/bin/bash
 
-./openpnp.sh -DconfigDir=/home/pi/wrecklab-openpnp/.openpnp2
+./openpnp.sh -DconfigDir=/Users/stefanocottafavi/wrecklab-openpnp/.openpnp2

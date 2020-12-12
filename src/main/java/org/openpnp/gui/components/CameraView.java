@@ -40,6 +40,7 @@ import java.awt.event.MouseMotionListener;
 import java.awt.event.MouseWheelEvent;
 import java.awt.event.MouseWheelListener;
 import java.awt.font.TextLayout;
+import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.text.DateFormat;
@@ -66,6 +67,7 @@ import org.openpnp.gui.components.reticle.Reticle;
 import org.openpnp.model.Configuration;
 import org.openpnp.model.Location;
 import org.openpnp.spi.Camera;
+import org.openpnp.spi.HeadMountable;
 import org.openpnp.spi.Nozzle;
 import org.openpnp.util.MovableUtils;
 import org.openpnp.util.UiUtils;
@@ -77,6 +79,7 @@ import org.pmw.tinylog.Logger;
 public class CameraView extends JComponent implements CameraListener {
     private static final String PREF_RETICLE = "CamerView.reticle";
     private static final String PREF_ZOOM_INCREMENT = "CamerView.zoomIncrement";
+    private static final String PREF_RENDERING_QUALITY = "CamerView.renderingQuality";
     private static final double DEFAULT_ZOOM_INCREMENT = 0.01;
 
     private static final String DEFAULT_RETICLE_KEY = "DEFAULT_RETICLE_KEY";
@@ -204,6 +207,10 @@ public class CameraView extends JComponent implements CameraListener {
     long lastFrameReceivedTime = 0;
     MovingAverage fpsAverage = new MovingAverage(24);
     double fps = 0;
+    public enum RenderingQuality {
+        Low, High, BestScale
+    }
+    RenderingQuality renderingQuality = RenderingQuality.Low;
     
     public CameraView() {
         setBackground(Color.black);
@@ -239,6 +246,10 @@ public class CameraView extends JComponent implements CameraListener {
 
     private String getZoomIncrementPrefKey() {
         return PREF_ZOOM_INCREMENT + "." + camera.getId();
+    }
+
+    private String getQualityRenderingPrefKey() {
+        return PREF_RENDERING_QUALITY + "." + camera.getId();
     }
 
     public void addActionListener(CameraViewActionListener listener) {
@@ -281,6 +292,13 @@ public class CameraView extends JComponent implements CameraListener {
 
         // load the zoom increment pref, if any
         zoomIncPerMouseWheelTick = prefs.getDouble(getZoomIncrementPrefKey(), DEFAULT_ZOOM_INCREMENT);
+        // load sub.pixel rendering prefs, if any.
+        try {
+            renderingQuality = RenderingQuality.valueOf(prefs.get(getQualityRenderingPrefKey(), RenderingQuality.Low.toString()));
+        }
+        catch (Exception e) {
+            // ignore errors
+        }
 
     }
 
@@ -354,6 +372,16 @@ public class CameraView extends JComponent implements CameraListener {
         this.zoomIncPerMouseWheelTick = zoomIncPerMouseWheelTick;
     }
     
+    public RenderingQuality getRenderingQuality() {
+        return renderingQuality;
+    }
+
+    public void setRenderingQuality(RenderingQuality renderingQuality) {
+        prefs.put(getQualityRenderingPrefKey(), renderingQuality.toString());
+        this.renderingQuality = renderingQuality;
+        calculateScalingData();
+    }
+
     /**
      * Causes a short flash in the CameraView to get the user's attention.
      */
@@ -370,6 +398,10 @@ public class CameraView extends JComponent implements CameraListener {
                 }
             }
         }, 0, 30, TimeUnit.MILLISECONDS);
+    }
+    
+    public CameraViewFilter getCameraViewFilter() {
+        return this.cameraViewFilter;
     }
 
     public void setCameraViewFilter(CameraViewFilter cameraViewFilter) {
@@ -503,7 +535,7 @@ public class CameraView extends JComponent implements CameraListener {
 
         lastSourceWidth = image.getWidth();
         lastSourceHeight = image.getHeight();
-
+        
         double heightRatio = lastSourceHeight / destHeight;
         double widthRatio = lastSourceWidth / destWidth;
 
@@ -520,6 +552,15 @@ public class CameraView extends JComponent implements CameraListener {
 
         scaledWidth *= zoom;
         scaledHeight *= zoom;
+
+        if (renderingQuality == RenderingQuality.BestScale) {
+            // Bring to an integral scaling factor.
+            double scalingFactor = lastSourceWidth > scaledWidth ? 
+                    1./Math.max(1, Math.round(lastSourceWidth/scaledWidth))
+                    : Math.max(1, Math.round(scaledWidth/lastSourceWidth));
+            scaledWidth = (int)(lastSourceWidth*scalingFactor);
+            scaledHeight = (int)(lastSourceHeight*scalingFactor);
+        }
 
         imageX = ins.left + (width / 2) - (scaledWidth / 2);
         imageY = ins.top + (height / 2) - (scaledHeight / 2);
@@ -549,7 +590,21 @@ public class CameraView extends JComponent implements CameraListener {
         g2d.fillRect(ins.left, ins.top, width, height);
         if (image != null) {
             // Only render if there is a valid image.
-            g2d.drawImage(lastFrame, imageX, imageY, scaledWidth, scaledHeight, null);
+            if (renderingQuality == RenderingQuality.Low) {
+                g2d.drawImage(lastFrame, imageX, imageY, scaledWidth, scaledHeight, null);
+            }
+            else {
+                g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                AffineTransform t = new AffineTransform();
+                double scaleW = ((double)scaledWidth)/image.getWidth();
+                double scaleH = ((double)scaledHeight)/image.getHeight();
+                // Scaled
+                t.translate(imageX, imageY);
+                t.scale(scaleW, scaleH);
+                g2d.drawImage(lastFrame, t, null);
+            }
 
             double c = MainFrame.get().getMachineControls().getSelectedTool().getLocation()
                     .getRotation();
@@ -606,7 +661,8 @@ public class CameraView extends JComponent implements CameraListener {
     }
     
     private boolean isPointInsideDragJogRotationHandle(int x, int y) {
-        if (camera.getHead() == null) {
+        HeadMountable selectedTool = MainFrame.get().getMachineControls().getSelectedTool(); 
+        if (selectedTool.getAxisRotation() == null) {
             return false;
         }
         
@@ -618,7 +674,7 @@ public class CameraView extends JComponent implements CameraListener {
         
         // The rotation handle is drawn on an imaginary circle centered in the view
         double rotHandleRadius = Math.min(width, height) / 2 * .80;
-        double rotHandleAngle = -Utils2D.normalizeAngle(camera.getLocation().getRotation() + 90);
+        double rotHandleAngle = -Utils2D.normalizeAngle(selectedTool.getLocation().getRotation() + 90);
         double rotHandleX = rotHandleRadius * Math.cos(Math.toRadians(rotHandleAngle)) + (width / 2.);
         double rotHandleY = rotHandleRadius * Math.sin(Math.toRadians(rotHandleAngle)) + (height / 2.);
         
@@ -653,7 +709,8 @@ public class CameraView extends JComponent implements CameraListener {
     }
     
     private void paintDragJogRotationHandle(Graphics2D g2d, boolean active) {
-        if (camera.getHead() == null) {
+        HeadMountable selectedTool = MainFrame.get().getMachineControls().getSelectedTool(); 
+        if (selectedTool.getAxisRotation() == null) {
             return;
         }
         
@@ -663,7 +720,7 @@ public class CameraView extends JComponent implements CameraListener {
 
         // The rotation handle is drawn on an imaginary circle centered in the view
         double rotHandleRadius = Math.min(width, height) / 2 * .80;
-        double rotHandleAngle = -Utils2D.normalizeAngle(camera.getLocation().getRotation() + 90);
+        double rotHandleAngle = -Utils2D.normalizeAngle(selectedTool.getLocation().getRotation() + 90);
         double rotHandleX = rotHandleRadius * Math.cos(Math.toRadians(rotHandleAngle)) + (width / 2.);
         double rotHandleY = rotHandleRadius * Math.sin(Math.toRadians(rotHandleAngle)) + (height / 2.);
 
@@ -1329,6 +1386,8 @@ public class CameraView extends JComponent implements CameraListener {
                 Nozzle nozzle = MainFrame.get().getMachineControls().getSelectedNozzle();
                 // Add the offsets to the Camera's nozzle calibrated position.
                 Location location = camera.getLocation(nozzle).add(offsets);
+                // Only change X/Y. 
+                location = nozzle.getLocation().derive(location, true, true, false, false);
                 MovableUtils.moveToLocationAtSafeZ(nozzle, location);
             }
             else {
@@ -1354,15 +1413,12 @@ public class CameraView extends JComponent implements CameraListener {
         }
 
         double targetAngle = Utils2D.normalizeAngle(-(rotTargetHandleAngle + 90));
+        HeadMountable selectedTool = MainFrame.get().getMachineControls().getSelectedTool();
+
         UiUtils.submitUiMachineTask(() -> {
-            if (camera.getHead() == null) {
-                Logger.warn("Drag rotate not yet implemented for upward facing cameras."); 
-            }
-            else {
-                Location location = camera.getLocation();
-                location = location.derive(null, null, null, targetAngle);
-                MovableUtils.moveToLocationAtSafeZ(camera, location);
-            }
+            Location location = selectedTool.getLocation();
+            location = location.derive(null, null, null, targetAngle);
+            MovableUtils.moveToLocationAtSafeZ(selectedTool, location);
         });
     }
 
@@ -1559,7 +1615,10 @@ public class CameraView extends JComponent implements CameraListener {
     private MouseWheelListener mouseWheelListener = new MouseWheelListener() {
         @Override
         public void mouseWheelMoved(MouseWheelEvent e) {
-            zoom -= e.getPreciseWheelRotation() * zoomIncPerMouseWheelTick;
+            double zoomInc = Math.max(zoomIncPerMouseWheelTick,
+                    // When best-scale is selected, we can only zoom by 1.0 or faster.
+                    renderingQuality == RenderingQuality.BestScale ? 1.0 : 0);
+            zoom = (Math.round(zoom/zoomInc) - e.getPreciseWheelRotation()) * zoomInc; 
             zoom = Math.max(zoom, 1.0d);
             zoom = Math.min(zoom, 100d);
             calculateScalingData();

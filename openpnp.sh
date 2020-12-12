@@ -15,9 +15,9 @@ esac
 
 case "$platform" in
 	mac)
-		java -Xdock:name=OpenPnP -jar $rootdir/target/openpnp-gui-0.0.1-alpha-SNAPSHOT.jar
+		java -Xdock:name=OpenPnP -jar -DconfigDir=./wrecklab-openpnp/.openpnp2 ./openpnp/target/openpnp-gui-0.0.1-alpha-SNAPSHOT.jar
 	;;
 	linux)
-		java $1 -jar $rootdir/target/openpnp-gui-0.0.1-alpha-SNAPSHOT.jar
+		java -jar -DconfigDir=./wrecklab-openpnp/.openpnp2 ./openpnp/target/openpnp-gui-0.0.1-alpha-SNAPSHOT.jar
 	;;
 esac

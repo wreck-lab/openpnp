@@ -86,6 +86,8 @@ public class JobPlacementsPanel extends JPanel {
     private static Color statusColorReady = new Color(157, 255, 168);
     private static Color statusColorError = new Color(255, 157, 157);
     private static Color statusColorDisabled = new Color(180, 180, 180);
+    
+    private TrainPlacementAction trainPlacementAction = new TrainPlacementAction();
 
     public JobPlacementsPanel(JobPanel jobPanel) {
     	this.jobPanel = jobPanel;
@@ -101,7 +103,8 @@ public class JobPlacementsPanel extends JPanel {
 
         singleSelectionActionGroup = new ActionGroup(removeAction, editPlacementFeederAction,
                 setTypeAction, setSideAction, setPlacedAction, setErrorHandlingAction,
-                setEnabledAction);
+                setEnabledAction,
+                trainPlacementAction);
         singleSelectionActionGroup.setEnabled(false);
 
         multiSelectionActionGroup = new ActionGroup(removeAction, setTypeAction, setSideAction,
@@ -114,6 +117,7 @@ public class JobPlacementsPanel extends JPanel {
         captureAndPositionActionGroup.setEnabled(false);
 
         JComboBox<PartsComboBoxModel> partsComboBox = new JComboBox(new PartsComboBoxModel());
+        partsComboBox.setMaximumRowCount(20);
         partsComboBox.setRenderer(new IdentifiableListCellRenderer<Part>());
         JComboBox<Side> sidesComboBox = new JComboBox(Side.values());
         // Note we don't use Type.values() here because there are a couple Types that are only
@@ -268,6 +272,12 @@ public class JobPlacementsPanel extends JPanel {
         JButton btnEditFeeder = new JButton(editPlacementFeederAction);
         btnEditFeeder.setHideActionText(true);
         toolBarPlacements.add(btnEditFeeder);
+
+        toolBarPlacements.addSeparator();
+
+        JButton btnTrainPlacement = new JButton(trainPlacementAction);
+        btnTrainPlacement.setHideActionText(true);
+        toolBarPlacements.add(btnTrainPlacement);
 
         JPanel panel_1 = new JPanel();
         panel.add(panel_1, BorderLayout.EAST);
@@ -484,6 +494,9 @@ public class JobPlacementsPanel extends JPanel {
             UiUtils.submitUiMachineTask(() -> {
                 Location location = Utils2D.calculateBoardPlacementLocation(boardLocation,
                         getSelection().getLocation());
+                System.out.println(boardLocation);
+                System.out.println(getSelection());
+                System.out.println(location);
 
                 Camera camera = MainFrame.get().getMachineControls().getSelectedTool().getHead()
                         .getDefaultCamera();
